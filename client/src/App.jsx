@@ -16,6 +16,25 @@ export default function App() {
   const pendingUploadsRef = useRef([]);
   const recordingSessionIdRef = useRef("");
 
+  // Theme State
+  const [theme, setTheme] = useState(() => {
+    const saved = localStorage.getItem("theme");
+    if (saved === "light" || saved === "dark") return saved;
+    return window.matchMedia("(prefers-color-scheme: dark)").matches
+      ? "dark"
+      : "light";
+  });
+
+  const isDark = theme === "dark";
+
+  const toggleTheme = () => {
+    setTheme((prev) => {
+      const next = prev === "dark" ? "light" : "dark";
+      localStorage.setItem("theme", next);
+      return next;
+    });
+  };
+
   // Navigation & Mode
   const [screen, setScreen] = useState("home"); // "home" | "call"
   const [mode, setMode] = useState("create"); // "create" | "join"
@@ -85,7 +104,9 @@ export default function App() {
         audio
           .play()
           .catch(() =>
-            setStatus("Click anywhere on the page if you cannot hear remote audio."),
+            setStatus(
+              "Click anywhere on the page if you cannot hear remote audio.",
+            ),
           );
       });
       peer.on("close", () => removePeer(peerId));
@@ -264,26 +285,32 @@ export default function App() {
       });
       streamRef.current = stream;
 
-      socketRef.current.emit("room:join", { roomId: targetRoomId }, (result) => {
-        if (!result?.ok) {
-          stream.getTracks().forEach((track) => track.stop());
-          streamRef.current = null;
-          setStatus("Ready");
-          setError(result?.error || "Could not join voice session.");
-          return;
-        }
-        setRoomId(result.roomId);
-        setRoomInput(result.roomId);
-        setScreen("call");
-        setMuted(false);
-        try {
-          startRecording(stream);
-        } catch (err) {
-          setError(err.message || "Microphone recording initialization failed.");
-        }
-        setStatus("Connected to voice channel.");
-        result.peers.forEach((peerId) => createPeer(peerId, false));
-      });
+      socketRef.current.emit(
+        "room:join",
+        { roomId: targetRoomId },
+        (result) => {
+          if (!result?.ok) {
+            stream.getTracks().forEach((track) => track.stop());
+            streamRef.current = null;
+            setStatus("Ready");
+            setError(result?.error || "Could not join voice session.");
+            return;
+          }
+          setRoomId(result.roomId);
+          setRoomInput(result.roomId);
+          setScreen("call");
+          setMuted(false);
+          try {
+            startRecording(stream);
+          } catch (err) {
+            setError(
+              err.message || "Microphone recording initialization failed.",
+            );
+          }
+          setStatus("Connected to voice channel.");
+          result.peers.forEach((peerId) => createPeer(peerId, false));
+        },
+      );
     } catch (err) {
       stream?.getTracks().forEach((track) => track.stop());
       streamRef.current = null;
@@ -302,7 +329,9 @@ export default function App() {
 
     const normalized = normalizeUsername(username);
     if (!validUsername(normalized)) {
-      setError("Username must be 3–20 characters (letters, numbers, underscores).");
+      setError(
+        "Username must be 3–20 characters (letters, numbers, underscores).",
+      );
       return;
     }
 
@@ -404,54 +433,143 @@ export default function App() {
   }
 
   return (
-    <div className="min-h-screen bg-slate-950 font-sans text-slate-100 antialiased selection:bg-slate-700 selection:text-white">
-      {/* Background Subtle Gradient & Structure */}
+    <div
+      className={`min-h-screen font-sans antialiased transition-colors duration-200 ${
+        isDark ? "bg-slate-950 text-slate-100" : "bg-slate-50 text-slate-900"
+      }`}
+    >
       <div className="relative mx-auto flex min-h-screen max-w-4xl flex-col justify-between px-4 py-8 sm:px-6 sm:py-12">
-        {/* Top Header */}
-        <header className="flex items-center justify-between border-b border-slate-800/80 pb-6">
+        {/* Header */}
+        <header
+          className={`flex items-center justify-between border-b pb-6 transition-colors ${
+            isDark ? "border-slate-800" : "border-slate-200"
+          }`}
+        >
           <div className="flex items-center gap-3">
-            <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-slate-800 border border-slate-700/60 shadow-sm">
-              <span className="font-semibold text-slate-200">VR</span>
+            <div
+              className={`flex h-10 w-10 items-center justify-center rounded-xl border font-semibold shadow-sm transition-colors ${
+                isDark
+                  ? "border-slate-700 bg-slate-800 text-slate-200"
+                  : "border-slate-200 bg-white text-slate-800"
+              }`}
+            >
+              EP
             </div>
             <div>
-              <h1 className="text-base font-semibold tracking-tight text-white">
-                Voice Room
+              <h1
+                className={`text-base font-semibold tracking-tight ${
+                  isDark ? "text-white" : "text-slate-900"
+                }`}
+              >
+                English Practice
               </h1>
-              <p className="text-xs text-slate-400">
+              <p
+                className={`text-xs ${isDark ? "text-slate-400" : "text-slate-500"}`}
+              >
                 Peer-to-peer conversational space
               </p>
             </div>
           </div>
 
-          <div className="flex items-center gap-2">
-            <span className="inline-flex items-center gap-1.5 rounded-full border border-slate-800 bg-slate-900/60 px-3 py-1 text-xs font-medium text-slate-300">
+          <div className="flex items-center gap-2.5">
+            {/* Status Pill */}
+            <span
+              className={`hidden sm:inline-flex items-center gap-1.5 rounded-full border px-3 py-1 text-xs font-medium ${
+                isDark
+                  ? "border-slate-800 bg-slate-900/60 text-slate-300"
+                  : "border-slate-200 bg-white text-slate-600"
+              }`}
+            >
               <span className="h-1.5 w-1.5 rounded-full bg-emerald-500" />
               WebRTC Audio
             </span>
+
+            {/* Light / Dark Mode Toggle Button */}
+            <button
+              type="button"
+              onClick={toggleTheme}
+              aria-label={
+                isDark ? "Switch to light theme" : "Switch to dark theme"
+              }
+              className={`flex h-9 w-9 items-center justify-center rounded-xl border transition-all ${
+                isDark
+                  ? "border-slate-800 bg-slate-900 text-slate-300 hover:border-slate-700 hover:text-white"
+                  : "border-slate-200 bg-white text-slate-600 hover:border-slate-300 hover:text-slate-900 shadow-sm"
+              }`}
+            >
+              {isDark ? (
+                /* Sun Icon */
+                <svg
+                  className="h-4 w-4"
+                  fill="none"
+                  viewBox="0 0 24 24"
+                  stroke="currentColor"
+                  strokeWidth={2}
+                >
+                  <path
+                    strokeLinecap="round"
+                    strokeLinejoin="round"
+                    d="M12 3v1m0 16v1m9-9h-1M4 12H3m15.364 6.364l-.707-.707M6.343 6.343l-.707-.707m12.728 0l-.707.707M6.343 17.657l-.707.707M16 12a4 4 0 11-8 0 4 4 0 018 0z"
+                  />
+                </svg>
+              ) : (
+                /* Moon Icon */
+                <svg
+                  className="h-4 w-4"
+                  fill="none"
+                  viewBox="0 0 24 24"
+                  stroke="currentColor"
+                  strokeWidth={2}
+                >
+                  <path
+                    strokeLinecap="round"
+                    strokeLinejoin="round"
+                    d="M20.354 15.354A9 9 0 018.646 3.646 9.003 9.003 0 0012 21a9.003 9.003 0 008.354-5.646z"
+                  />
+                </svg>
+              )}
+            </button>
           </div>
         </header>
 
-        {/* Main Content Area */}
+        {/* Main Body */}
         <main className="my-auto py-8">
           {screen === "home" ? (
             <div className="mx-auto max-w-lg">
-              {/* Primary Action Card */}
-              <div className="rounded-2xl border border-slate-800 bg-slate-900/90 p-6 shadow-xl backdrop-blur-sm sm:p-8">
-                {/* Intro Copy */}
+              <div
+                className={`rounded-2xl border p-6 shadow-xl backdrop-blur-sm sm:p-8 transition-colors ${
+                  isDark
+                    ? "border-slate-800 bg-slate-900/90"
+                    : "border-slate-200 bg-white"
+                }`}
+              >
                 <div className="mb-6 text-center sm:text-left">
-                  <h2 className="text-2xl font-bold tracking-tight text-white">
+                  <h2
+                    className={`text-2xl font-bold tracking-tight ${
+                      isDark ? "text-white" : "text-slate-900"
+                    }`}
+                  >
                     Start Speaking
                   </h2>
-                  <p className="mt-1 text-sm text-slate-400">
-                    Collaborate with peers to build fluency. No passwords needed.
+                  <p
+                    className={`mt-1 text-sm ${
+                      isDark ? "text-slate-400" : "text-slate-500"
+                    }`}
+                  >
+                    Collaborate with peers to build fluency. No passwords
+                    needed.
                   </p>
                 </div>
 
-                {/* Segmented Control / Toggle Switch */}
+                {/* Segmented Toggle: Create vs Join */}
                 <div
                   role="tablist"
                   aria-label="Room Action Selection"
-                  className="mb-6 grid grid-cols-2 rounded-xl bg-slate-950 p-1 border border-slate-800"
+                  className={`mb-6 grid grid-cols-2 rounded-xl p-1 border transition-colors ${
+                    isDark
+                      ? "border-slate-800 bg-slate-950"
+                      : "border-slate-200 bg-slate-100"
+                  }`}
                 >
                   <button
                     type="button"
@@ -463,8 +581,12 @@ export default function App() {
                     }}
                     className={`flex items-center justify-center gap-2 rounded-lg py-2.5 text-xs font-semibold tracking-wide transition-all ${
                       mode === "create"
-                        ? "bg-slate-800 text-white shadow-sm border border-slate-700/60"
-                        : "text-slate-400 hover:text-slate-200"
+                        ? isDark
+                          ? "border border-slate-700/60 bg-slate-800 text-white shadow-sm"
+                          : "border border-slate-200/80 bg-white text-slate-900 shadow-sm"
+                        : isDark
+                          ? "text-slate-400 hover:text-slate-200"
+                          : "text-slate-500 hover:text-slate-800"
                     }`}
                   >
                     <svg
@@ -493,8 +615,12 @@ export default function App() {
                     }}
                     className={`flex items-center justify-center gap-2 rounded-lg py-2.5 text-xs font-semibold tracking-wide transition-all ${
                       mode === "join"
-                        ? "bg-slate-800 text-white shadow-sm border border-slate-700/60"
-                        : "text-slate-400 hover:text-slate-200"
+                        ? isDark
+                          ? "border border-slate-700/60 bg-slate-800 text-white shadow-sm"
+                          : "border border-slate-200/80 bg-white text-slate-900 shadow-sm"
+                        : isDark
+                          ? "text-slate-400 hover:text-slate-200"
+                          : "text-slate-500 hover:text-slate-800"
                     }`}
                   >
                     <svg
@@ -514,20 +640,26 @@ export default function App() {
                   </button>
                 </div>
 
-                {/* Form Handling Both Scenarios */}
+                {/* Main Form */}
                 <form onSubmit={handleFormSubmit} className="space-y-4">
-                  {/* Field: Username (Both modes) */}
+                  {/* Field: Username */}
                   <div>
                     <label
                       htmlFor="username"
-                      className="block text-xs font-medium uppercase tracking-wider text-slate-300"
+                      className={`block text-xs font-medium uppercase tracking-wider ${
+                        isDark ? "text-slate-300" : "text-slate-700"
+                      }`}
                     >
                       Your Username
                     </label>
                     <input
                       id="username"
                       type="text"
-                      className="mt-1.5 w-full rounded-xl border border-slate-800 bg-slate-950/70 px-3.5 py-2.5 text-sm text-slate-100 placeholder-slate-500 outline-none transition focus:border-slate-600 focus:ring-1 focus:ring-slate-600"
+                      className={`mt-1.5 w-full rounded-xl border px-3.5 py-2.5 text-sm outline-none transition ${
+                        isDark
+                          ? "border-slate-800 bg-slate-950/70 text-slate-100 placeholder-slate-500 focus:border-slate-600 focus:ring-1 focus:ring-slate-600"
+                          : "border-slate-200 bg-slate-50 text-slate-900 placeholder-slate-400 focus:border-slate-400 focus:bg-white focus:ring-1 focus:ring-slate-300"
+                      }`}
                       value={username}
                       onChange={(e) => setUsername(e.target.value)}
                       placeholder="e.g. aljafar_01"
@@ -535,24 +667,34 @@ export default function App() {
                       maxLength={20}
                       autoComplete="username"
                     />
-                    <p className="mt-1 text-[11px] text-slate-500">
+                    <p
+                      className={`mt-1 text-[11px] ${
+                        isDark ? "text-slate-500" : "text-slate-400"
+                      }`}
+                    >
                       3–20 lowercase characters, numbers, or underscores.
                     </p>
                   </div>
 
-                  {/* Field: Room ID (Only Join Mode) */}
+                  {/* Field: Room ID (Only for Join) */}
                   {mode === "join" && (
                     <div className="transition-all duration-150">
                       <label
                         htmlFor="roomId"
-                        className="block text-xs font-medium uppercase tracking-wider text-slate-300"
+                        className={`block text-xs font-medium uppercase tracking-wider ${
+                          isDark ? "text-slate-300" : "text-slate-700"
+                        }`}
                       >
                         Room ID
                       </label>
                       <input
                         id="roomId"
                         type="text"
-                        className="mt-1.5 w-full uppercase tracking-wider font-mono rounded-xl border border-slate-800 bg-slate-950/70 px-3.5 py-2.5 text-sm text-slate-100 placeholder-slate-500 outline-none transition focus:border-slate-600 focus:ring-1 focus:ring-slate-600"
+                        className={`mt-1.5 w-full font-mono uppercase tracking-wider rounded-xl border px-3.5 py-2.5 text-sm outline-none transition ${
+                          isDark
+                            ? "border-slate-800 bg-slate-950/70 text-slate-100 placeholder-slate-500 focus:border-slate-600 focus:ring-1 focus:ring-slate-600"
+                            : "border-slate-200 bg-slate-50 text-slate-900 placeholder-slate-400 focus:border-slate-400 focus:bg-white focus:ring-1 focus:ring-slate-300"
+                        }`}
                         value={roomInput}
                         onChange={(e) => setRoomInput(e.target.value)}
                         placeholder="e.g. 7X9K2L"
@@ -561,11 +703,21 @@ export default function App() {
                     </div>
                   )}
 
-                  {/* Field: Microphone Consent Checkbox (Both modes) */}
-                  <label className="flex items-start gap-3 rounded-xl border border-slate-800/80 bg-slate-950/40 p-3.5 text-xs leading-relaxed text-slate-300 cursor-pointer select-none hover:border-slate-700 transition">
+                  {/* Field: Microphone Consent Checkbox */}
+                  <label
+                    className={`flex items-start gap-3 rounded-xl border p-3.5 text-xs leading-relaxed cursor-pointer select-none transition ${
+                      isDark
+                        ? "border-slate-800/80 bg-slate-950/40 text-slate-300 hover:border-slate-700"
+                        : "border-slate-200 bg-slate-50/70 text-slate-600 hover:border-slate-300"
+                    }`}
+                  >
                     <input
                       type="checkbox"
-                      className="mt-0.5 h-4 w-4 rounded border-slate-700 bg-slate-900 text-slate-100 accent-slate-600 focus:ring-0"
+                      className={`mt-0.5 h-4 w-4 rounded accent-slate-700 ${
+                        isDark
+                          ? "border-slate-700 bg-slate-900"
+                          : "border-slate-300 bg-white"
+                      }`}
                       checked={consent}
                       onChange={(e) => setConsent(e.target.checked)}
                     />
@@ -575,11 +727,15 @@ export default function App() {
                     </span>
                   </label>
 
-                  {/* Error Notification */}
+                  {/* Error Banner */}
                   {error && (
                     <div
                       role="alert"
-                      className="rounded-xl border border-rose-900/60 bg-rose-950/40 px-3.5 py-2.5 text-xs text-rose-300"
+                      className={`rounded-xl border px-3.5 py-2.5 text-xs ${
+                        isDark
+                          ? "border-rose-900/60 bg-rose-950/40 text-rose-300"
+                          : "border-rose-200 bg-rose-50 text-rose-700"
+                      }`}
                     >
                       {error}
                     </div>
@@ -588,14 +744,24 @@ export default function App() {
                   {/* Submit CTA */}
                   <button
                     type="submit"
-                    className="w-full rounded-xl bg-slate-100 py-3 text-sm font-semibold text-slate-950 shadow-md transition hover:bg-white active:scale-[0.99]"
+                    className={`w-full rounded-xl py-3 text-sm font-semibold shadow-sm transition active:scale-[0.99] ${
+                      isDark
+                        ? "bg-slate-100 text-slate-950 hover:bg-white"
+                        : "bg-slate-900 text-white hover:bg-slate-800"
+                    }`}
                   >
-                    {mode === "create" ? "Create Room & Connect" : "Join Voice Room"}
+                    {mode === "create"
+                      ? "Create Room & Connect"
+                      : "Join Voice Room"}
                   </button>
                 </form>
 
-                {/* Analysis Drawer Trigger */}
-                <div className="mt-6 border-t border-slate-800/80 pt-5 text-center">
+                {/* Analysis Accordion */}
+                <div
+                  className={`mt-6 border-t pt-5 text-center ${
+                    isDark ? "border-slate-800/80" : "border-slate-200"
+                  }`}
+                >
                   {!showAnalysisLogin ? (
                     <button
                       type="button"
@@ -605,42 +771,74 @@ export default function App() {
                         setAnalysisError("");
                         setAnalysis(null);
                       }}
-                      className="text-xs font-medium text-slate-400 hover:text-slate-200 transition"
+                      className={`text-xs font-medium transition ${
+                        isDark
+                          ? "text-slate-400 hover:text-slate-200"
+                          : "text-slate-500 hover:text-slate-800"
+                      }`}
                     >
-                      Looking for past feedback? <span className="underline">Review latest analysis</span>
+                      Looking for past feedback?{" "}
+                      <span className="underline">Review latest analysis</span>
                     </button>
                   ) : (
-                    <form onSubmit={analyzeLatest} className="space-y-3 text-left">
+                    <form
+                      onSubmit={analyzeLatest}
+                      className="space-y-3 text-left"
+                    >
                       <div className="flex items-center justify-between">
-                        <span className="text-xs font-semibold uppercase tracking-wider text-slate-300">
+                        <span
+                          className={`text-xs font-semibold uppercase tracking-wider ${
+                            isDark ? "text-slate-300" : "text-slate-700"
+                          }`}
+                        >
                           Inspect Past Performance
                         </span>
                         <button
                           type="button"
                           onClick={() => setShowAnalysisLogin(false)}
-                          className="text-xs text-slate-400 hover:text-slate-200"
+                          className={`text-xs ${
+                            isDark
+                              ? "text-slate-400 hover:text-slate-200"
+                              : "text-slate-500 hover:text-slate-800"
+                          }`}
                         >
                           Close
                         </button>
                       </div>
 
                       <input
-                        className="w-full rounded-xl border border-slate-800 bg-slate-950 px-3 py-2 text-xs text-slate-100 placeholder-slate-500 outline-none focus:border-slate-600"
+                        className={`w-full rounded-xl border px-3 py-2 text-xs outline-none ${
+                          isDark
+                            ? "border-slate-800 bg-slate-950 text-slate-100 placeholder-slate-500 focus:border-slate-600"
+                            : "border-slate-200 bg-slate-50 text-slate-900 placeholder-slate-400 focus:border-slate-400 focus:bg-white"
+                        }`}
                         value={analysisUsername}
                         onChange={(e) => setAnalysisUsername(e.target.value)}
                         placeholder="Recorded username"
                       />
 
                       {analysisError && (
-                        <p className="text-xs text-rose-400">{analysisError}</p>
+                        <p
+                          className={`text-xs ${
+                            isDark ? "text-rose-400" : "text-rose-600"
+                          }`}
+                        >
+                          {analysisError}
+                        </p>
                       )}
 
                       <button
                         type="submit"
                         disabled={analyzing}
-                        className="w-full rounded-xl border border-slate-700 bg-slate-800 py-2 text-xs font-medium text-white hover:bg-slate-700 transition disabled:opacity-50"
+                        className={`w-full rounded-xl border py-2 text-xs font-medium transition disabled:opacity-50 ${
+                          isDark
+                            ? "border-slate-700 bg-slate-800 text-white hover:bg-slate-700"
+                            : "border-slate-300 bg-slate-100 text-slate-800 hover:bg-slate-200"
+                        }`}
                       >
-                        {analyzing ? "Running analysis…" : "Fetch Speaking Report"}
+                        {analyzing
+                          ? "Running analysis…"
+                          : "Fetch Speaking Report"}
                       </button>
                     </form>
                   )}
@@ -650,14 +848,31 @@ export default function App() {
           ) : (
             /* Active Call Screen */
             <div className="mx-auto max-w-xl">
-              <div className="rounded-2xl border border-slate-800 bg-slate-900 p-6 shadow-xl sm:p-8">
-                {/* Room Status Indicator */}
-                <div className="flex items-center justify-between border-b border-slate-800 pb-5">
+              <div
+                className={`rounded-2xl border p-6 shadow-xl sm:p-8 transition-colors ${
+                  isDark
+                    ? "border-slate-800 bg-slate-900"
+                    : "border-slate-200 bg-white"
+                }`}
+              >
+                <div
+                  className={`flex items-center justify-between border-b pb-5 ${
+                    isDark ? "border-slate-800" : "border-slate-200"
+                  }`}
+                >
                   <div>
-                    <span className="text-[11px] font-semibold uppercase tracking-wider text-slate-400">
+                    <span
+                      className={`text-[11px] font-semibold uppercase tracking-wider ${
+                        isDark ? "text-slate-400" : "text-slate-500"
+                      }`}
+                    >
                       Active Voice Session
                     </span>
-                    <h2 className="text-xl font-bold tracking-tight text-white">
+                    <h2
+                      className={`text-xl font-bold tracking-tight ${
+                        isDark ? "text-white" : "text-slate-900"
+                      }`}
+                    >
                       Room {roomId}
                     </h2>
                   </div>
@@ -665,7 +880,11 @@ export default function App() {
                   <button
                     type="button"
                     onClick={copyRoomId}
-                    className="inline-flex items-center gap-1.5 rounded-lg border border-slate-700 bg-slate-800/90 px-3 py-1.5 text-xs font-medium text-slate-200 transition hover:bg-slate-700"
+                    className={`inline-flex items-center gap-1.5 rounded-lg border px-3 py-1.5 text-xs font-medium transition ${
+                      isDark
+                        ? "border-slate-700 bg-slate-800/90 text-slate-200 hover:bg-slate-700"
+                        : "border-slate-200 bg-slate-100 text-slate-700 hover:bg-slate-200"
+                    }`}
                   >
                     {copied ? "Copied!" : "Copy Room ID"}
                   </button>
@@ -673,22 +892,61 @@ export default function App() {
 
                 {/* Session Meta */}
                 <div className="mt-5 grid grid-cols-2 gap-3">
-                  <div className="rounded-xl border border-slate-800 bg-slate-950/60 p-4">
-                    <p className="text-xs text-slate-400">Connected As</p>
-                    <p className="mt-1 font-mono text-sm font-semibold text-slate-200">
+                  <div
+                    className={`rounded-xl border p-4 ${
+                      isDark
+                        ? "border-slate-800 bg-slate-950/60"
+                        : "border-slate-200 bg-slate-50"
+                    }`}
+                  >
+                    <p
+                      className={`text-xs ${
+                        isDark ? "text-slate-400" : "text-slate-500"
+                      }`}
+                    >
+                      Connected As
+                    </p>
+                    <p
+                      className={`mt-1 font-mono text-sm font-semibold ${
+                        isDark ? "text-slate-200" : "text-slate-800"
+                      }`}
+                    >
                       @{username}
                     </p>
                   </div>
-                  <div className="rounded-xl border border-slate-800 bg-slate-950/60 p-4">
-                    <p className="text-xs text-slate-400">Participants</p>
-                    <p className="mt-1 text-sm font-semibold text-slate-200">
-                      {participants} {participants === 1 ? "speaker" : "speakers"}
+                  <div
+                    className={`rounded-xl border p-4 ${
+                      isDark
+                        ? "border-slate-800 bg-slate-950/60"
+                        : "border-slate-200 bg-slate-50"
+                    }`}
+                  >
+                    <p
+                      className={`text-xs ${
+                        isDark ? "text-slate-400" : "text-slate-500"
+                      }`}
+                    >
+                      Participants
+                    </p>
+                    <p
+                      className={`mt-1 text-sm font-semibold ${
+                        isDark ? "text-slate-200" : "text-slate-800"
+                      }`}
+                    >
+                      {participants}{" "}
+                      {participants === 1 ? "speaker" : "speakers"}
                     </p>
                   </div>
                 </div>
 
                 {/* Audio Status Banner */}
-                <div className="mt-4 flex items-center justify-between rounded-xl border border-slate-800 bg-slate-950/40 p-4">
+                <div
+                  className={`mt-4 flex items-center justify-between rounded-xl border p-4 ${
+                    isDark
+                      ? "border-slate-800 bg-slate-950/40"
+                      : "border-slate-200 bg-slate-50"
+                  }`}
+                >
                   <div className="flex items-center gap-3">
                     <span
                       className={`relative flex h-3 w-3 ${
@@ -700,16 +958,24 @@ export default function App() {
                       )}
                       <span
                         className={`relative inline-flex h-3 w-3 rounded-full ${
-                          recording ? "bg-rose-500" : "bg-slate-600"
+                          recording ? "bg-rose-500" : "bg-slate-400"
                         }`}
                       />
                     </span>
-                    <span className="text-xs text-slate-300">
+                    <span
+                      className={`text-xs ${
+                        isDark ? "text-slate-300" : "text-slate-600"
+                      }`}
+                    >
                       {saving ? "Finalizing audio chunks…" : status}
                     </span>
                   </div>
 
-                  <span className="font-mono text-xs text-slate-400">
+                  <span
+                    className={`font-mono text-xs ${
+                      isDark ? "text-slate-400" : "text-slate-500"
+                    }`}
+                  >
                     {muted ? "MUTED" : "LIVE"}
                   </span>
                 </div>
@@ -722,8 +988,12 @@ export default function App() {
                     disabled={saving}
                     className={`rounded-xl border py-3 text-xs font-semibold tracking-wide transition ${
                       muted
-                        ? "border-amber-700/80 bg-amber-950/30 text-amber-300 hover:bg-amber-950/50"
-                        : "border-slate-700 bg-slate-800 text-slate-200 hover:bg-slate-700"
+                        ? isDark
+                          ? "border-amber-700/80 bg-amber-950/30 text-amber-300 hover:bg-amber-950/50"
+                          : "border-amber-300 bg-amber-50 text-amber-800 hover:bg-amber-100"
+                        : isDark
+                          ? "border-slate-700 bg-slate-800 text-slate-200 hover:bg-slate-700"
+                          : "border-slate-200 bg-slate-100 text-slate-700 hover:bg-slate-200"
                     }`}
                   >
                     {muted ? "Unmute Microphone" : "Mute Microphone"}
@@ -733,43 +1003,85 @@ export default function App() {
                     type="button"
                     onClick={leaveCall}
                     disabled={saving}
-                    className="rounded-xl border border-rose-900/80 bg-rose-950/40 py-3 text-xs font-semibold tracking-wide text-rose-200 transition hover:bg-rose-900/60 disabled:opacity-50"
+                    className={`rounded-xl border py-3 text-xs font-semibold tracking-wide transition disabled:opacity-50 ${
+                      isDark
+                        ? "border-rose-900/80 bg-rose-950/40 text-rose-200 hover:bg-rose-900/60"
+                        : "border-rose-200 bg-rose-50 text-rose-700 hover:bg-rose-100"
+                    }`}
                   >
                     {saving ? "Saving..." : "Leave & Save Audio"}
                   </button>
                 </div>
 
                 {error && (
-                  <p className="mt-4 text-xs text-rose-400" role="alert">
+                  <p
+                    className={`mt-4 text-xs ${
+                      isDark ? "text-rose-400" : "text-rose-600"
+                    }`}
+                    role="alert"
+                  >
                     {error}
                   </p>
                 )}
 
-                {/* Hidden container for WebRTC Remote Audio Elements */}
-                <div ref={audioContainerRef} className="hidden" aria-hidden="true" />
+                <div
+                  ref={audioContainerRef}
+                  className="hidden"
+                  aria-hidden="true"
+                />
               </div>
             </div>
           )}
 
-          {/* Analysis Results Display */}
+          {/* Analysis View */}
           {analysis && (
-            <div className="mx-auto mt-8 max-w-2xl rounded-2xl border border-slate-800 bg-slate-900 p-6 shadow-xl sm:p-8">
-              <div className="flex items-center justify-between border-b border-slate-800 pb-4">
+            <div
+              className={`mx-auto mt-8 max-w-2xl rounded-2xl border p-6 shadow-xl sm:p-8 transition-colors ${
+                isDark
+                  ? "border-slate-800 bg-slate-900"
+                  : "border-slate-200 bg-white"
+              }`}
+            >
+              <div
+                className={`flex items-center justify-between border-b pb-4 ${
+                  isDark ? "border-slate-800" : "border-slate-200"
+                }`}
+              >
                 <div>
-                  <span className="text-[11px] font-semibold uppercase tracking-wider text-slate-400">
+                  <span
+                    className={`text-[11px] font-semibold uppercase tracking-wider ${
+                      isDark ? "text-slate-400" : "text-slate-500"
+                    }`}
+                  >
                     Speech Evaluation
                   </span>
-                  <h3 className="text-lg font-bold text-white">
+                  <h3
+                    className={`text-lg font-bold ${
+                      isDark ? "text-white" : "text-slate-900"
+                    }`}
+                  >
                     Performance Breakdown
                   </h3>
                 </div>
-                <span className="rounded-lg border border-slate-800 bg-slate-950 px-2.5 py-1 font-mono text-xs text-slate-300">
+                <span
+                  className={`rounded-lg border px-2.5 py-1 font-mono text-xs ${
+                    isDark
+                      ? "border-slate-800 bg-slate-950 text-slate-300"
+                      : "border-slate-200 bg-slate-50 text-slate-700"
+                  }`}
+                >
                   @{analysisUsername}
                 </span>
               </div>
 
               {!analysis.speechDetected ? (
-                <div className="mt-5 rounded-xl border border-amber-900/60 bg-amber-950/30 p-4 text-xs text-amber-200 leading-relaxed">
+                <div
+                  className={`mt-5 rounded-xl border p-4 text-xs leading-relaxed ${
+                    isDark
+                      ? "border-amber-900/60 bg-amber-950/30 text-amber-200"
+                      : "border-amber-200 bg-amber-50 text-amber-800"
+                  }`}
+                >
                   {analysis.noSpeechMessage ||
                     "Insufficient audio detected. Please record a conversation where you speak clearly."}
                 </div>
@@ -777,7 +1089,11 @@ export default function App() {
                 <div className="mt-6 space-y-6">
                   {/* Mistakes */}
                   <div>
-                    <h4 className="text-xs font-bold uppercase tracking-wider text-slate-400">
+                    <h4
+                      className={`text-xs font-bold uppercase tracking-wider ${
+                        isDark ? "text-slate-400" : "text-slate-500"
+                      }`}
+                    >
                       Identified Grammatical Inaccuracies
                     </h4>
                     {analysis.mistakes?.length ? (
@@ -785,23 +1101,49 @@ export default function App() {
                         {analysis.mistakes.map((item, idx) => (
                           <div
                             key={`m-${idx}`}
-                            className="rounded-xl border border-slate-800 bg-slate-950/70 p-4 text-xs"
+                            className={`rounded-xl border p-4 text-xs ${
+                              isDark
+                                ? "border-slate-800 bg-slate-950/70"
+                                : "border-slate-200 bg-slate-50"
+                            }`}
                           >
-                            <p className="text-slate-400 line-through">
+                            <p
+                              className={`line-through ${
+                                isDark ? "text-red-300" : "text-red-400"
+                              }`}
+                            >
                               {item.original}
                             </p>
-                            <p className="mt-1.5 font-semibold text-emerald-400">
+                            <p
+                              className={`mt-1.5 font-semibold ${
+                                isDark ? "text-green-300" : "text-green-800"
+                              }`}
+                            >
                               {item.correction}
                             </p>
-                            <p className="mt-2 text-slate-400">
-                              <span className="text-slate-300 font-medium">Context:</span>{" "}
+                            <p
+                              className={`mt-2 ${
+                                isDark ? "text-slate-400" : "text-slate-600"
+                              }`}
+                            >
+                              <span
+                                className={`font-medium ${
+                                  isDark ? "text-slate-300" : "text-slate-700"
+                                }`}
+                              >
+                                Reason:
+                              </span>{" "}
                               {item.reason}
                             </p>
                           </div>
                         ))}
                       </div>
                     ) : (
-                      <p className="mt-2 text-xs text-slate-400">
+                      <p
+                        className={`mt-2 text-xs ${
+                          isDark ? "text-slate-400" : "text-slate-500"
+                        }`}
+                      >
                         No major grammatical errors flagged.
                       </p>
                     )}
@@ -809,7 +1151,11 @@ export default function App() {
 
                   {/* Suggestions */}
                   <div>
-                    <h4 className="text-xs font-bold uppercase tracking-wider text-slate-400">
+                    <h4
+                      className={`text-xs font-bold uppercase tracking-wider ${
+                        isDark ? "text-slate-400" : "text-slate-500"
+                      }`}
+                    >
                       Natural Phrasing Suggestions
                     </h4>
                     {analysis.suggestions?.length ? (
@@ -817,21 +1163,49 @@ export default function App() {
                         {analysis.suggestions.map((item, idx) => (
                           <div
                             key={`s-${idx}`}
-                            className="rounded-xl border border-slate-800 bg-slate-950/70 p-4 text-xs"
+                            className={`rounded-xl border p-4 text-xs ${
+                              isDark
+                                ? "border-slate-800 bg-slate-950/70"
+                                : "border-slate-200 bg-slate-50"
+                            }`}
                           >
-                            <p className="text-slate-400">{item.original}</p>
-                            <p className="mt-1.5 font-semibold text-slate-200">
+                            <p
+                              className={
+                                isDark ? "text-slate-400" : "text-slate-500"
+                              }
+                            >
+                              {item.original}
+                            </p>
+                            <p
+                              className={`mt-1.5 font-semibold ${
+                                isDark ? "text-blue-400" : "text-blue-600"
+                              }`}
+                            >
                               {item.naturalVersion}
                             </p>
-                            <p className="mt-2 text-slate-400">
-                              <span className="text-slate-300 font-medium">Rationale:</span>{" "}
+                            <p
+                              className={`mt-2 ${
+                                isDark ? "text-slate-400" : "text-slate-600"
+                              }`}
+                            >
+                              <span
+                                className={`font-medium ${
+                                  isDark ? "text-slate-300" : "text-slate-700"
+                                }`}
+                              >
+                                Reason:
+                              </span>{" "}
                               {item.reason}
                             </p>
                           </div>
                         ))}
                       </div>
                     ) : (
-                      <p className="mt-2 text-xs text-slate-400">
+                      <p
+                        className={`mt-2 text-xs ${
+                          isDark ? "text-slate-400" : "text-slate-500"
+                        }`}
+                      >
                         Phrasing sounded natural and conversational.
                       </p>
                     )}
@@ -845,7 +1219,11 @@ export default function App() {
                   setAnalysis(null);
                   setShowAnalysisLogin(true);
                 }}
-                className="mt-6 w-full rounded-xl border border-slate-700 bg-slate-800 py-2.5 text-xs font-medium text-slate-200 transition hover:bg-slate-700"
+                className={`mt-6 w-full rounded-xl border py-2.5 text-xs font-medium transition ${
+                  isDark
+                    ? "border-slate-700 bg-slate-800 text-slate-200 hover:bg-slate-700"
+                    : "border-slate-200 bg-slate-100 text-slate-700 hover:bg-slate-200"
+                }`}
               >
                 Analyze Another User
               </button>
@@ -853,9 +1231,16 @@ export default function App() {
           )}
         </main>
 
-        {/* Quiet Footer */}
-        <footer className="border-t border-slate-800/60 pt-4 text-center text-xs text-slate-400">
-          Peer-to-peer audio encrypted via WebRTC. Recordings retained exclusively under your specified username.
+        {/* Footer */}
+        <footer
+          className={`border-t pt-4 text-center text-xs transition-colors ${
+            isDark
+              ? "border-slate-800 text-slate-500"
+              : "border-slate-200 text-slate-400"
+          }`}
+        >
+          Peer-to-peer audio encrypted via WebRTC. Recordings retained
+          exclusively under your specified username.
         </footer>
       </div>
     </div>
