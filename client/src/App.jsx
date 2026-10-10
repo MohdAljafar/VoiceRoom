@@ -99,7 +99,12 @@ export default function App() {
         audio.autoplay = true;
         audio.playsInline = true;
         audio.srcObject = remoteStream;
-        audioContainerRef.current?.appendChild(audio);
+        
+        // Ensure it attaches safely
+        if (audioContainerRef.current) {
+          audioContainerRef.current.appendChild(audio);
+        }
+        
         entry.audio = audio;
         audio
           .play()
@@ -438,6 +443,13 @@ export default function App() {
         isDark ? "bg-slate-950 text-slate-100" : "bg-slate-50 text-slate-900"
       }`}
     >
+      {/* 
+        CRITICAL FIX: Placed universally outside conditionals.
+        This prevents race conditions where WebRTC remoteStreams 
+        fire before React updates to the 'call' view.
+      */}
+      <div ref={audioContainerRef} className="hidden" aria-hidden="true" />
+
       <div className="relative mx-auto flex min-h-screen max-w-4xl flex-col justify-between px-4 py-8 sm:px-6 sm:py-12">
         {/* Header */}
         <header
@@ -1023,12 +1035,6 @@ export default function App() {
                     {error}
                   </p>
                 )}
-
-                <div
-                  ref={audioContainerRef}
-                  className="hidden"
-                  aria-hidden="true"
-                />
               </div>
             </div>
           )}
