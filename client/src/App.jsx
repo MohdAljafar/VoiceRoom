@@ -16,17 +16,26 @@ export default function App() {
   const pendingUploadsRef = useRef([]);
   const recordingSessionIdRef = useRef("");
 
-  const [screen, setScreen] = useState("home");
+  // Navigation & Mode
+  const [screen, setScreen] = useState("home"); // "home" | "call"
+  const [mode, setMode] = useState("create"); // "create" | "join"
+
+  // Form State
   const [username, setUsername] = useState("");
   const [roomInput, setRoomInput] = useState("");
-  const [roomId, setRoomId] = useState("");
   const [consent, setConsent] = useState(false);
+
+  // Call & WebRTC State
+  const [roomId, setRoomId] = useState("");
   const [muted, setMuted] = useState(false);
   const [recording, setRecording] = useState(false);
   const [saving, setSaving] = useState(false);
   const [participants, setParticipants] = useState(1);
   const [status, setStatus] = useState("Ready");
   const [error, setError] = useState("");
+  const [copied, setCopied] = useState(false);
+
+  // Analysis State
   const [showAnalysisLogin, setShowAnalysisLogin] = useState(false);
   const [analysisUsername, setAnalysisUsername] = useState("");
   const [analysis, setAnalysis] = useState(null);
@@ -76,7 +85,7 @@ export default function App() {
         audio
           .play()
           .catch(() =>
-            setStatus("Tap the page if you cannot hear other participants."),
+            setStatus("Click anywhere on the page if you cannot hear remote audio."),
           );
       });
       peer.on("close", () => removePeer(peerId));
@@ -107,9 +116,7 @@ export default function App() {
     const socket = io(SERVER_URL);
     socketRef.current = socket;
     socket.on("connect_error", () =>
-      setError(
-        "Cannot connect to the voice server. Check that the backend is running.",
-      ),
+      setError("Cannot reach voice server. Verify backend connectivity."),
     );
     socket.on("peer:joined", ({ peerId }) => createPeer(peerId, true));
     socket.on("webrtc:signal", ({ from, signal }) => {
@@ -118,6 +125,7 @@ export default function App() {
       if (entry && !entry.peer.destroyed) entry.peer.signal(signal);
     });
     socket.on("peer:left", ({ peerId }) => removePeer(peerId));
+
     return () => {
       const recorder = mediaRecorderRef.current;
       if (recorder && recorder.state !== "inactive") {
@@ -132,7 +140,7 @@ export default function App() {
 
   function startRecording(localStream) {
     if (!window.MediaRecorder)
-      throw new Error("This browser does not support audio recording.");
+      throw new Error("Audio recording is unsupported in this browser.");
     recordingSessionIdRef.current = `${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
     chunkSequenceRef.current = 0;
     pendingUploadsRef.current = [];
@@ -141,6 +149,7 @@ export default function App() {
       : {};
     const recorder = new MediaRecorder(localStream, options);
     mediaRecorderRef.current = recorder;
+
     recorder.ondataavailable = (event) => {
       if (!event.data || event.data.size === 0) return;
       const sequence = chunkSequenceRef.current++;
@@ -156,33 +165,29 @@ export default function App() {
         });
         const result = await response.json().catch(() => ({}));
         if (!response.ok)
-          throw new Error(
-            result.error || `Audio chunk ${sequence} failed to upload.`,
-          );
+          throw new Error(result.error || `Chunk ${sequence} upload failed.`);
       })();
       pendingUploadsRef.current.push(uploadPromise);
       uploadPromise.catch((err) => {
         console.error("Audio chunk upload failed:", err);
-        setStatus(
-          "An audio upload failed. Keep the tab open and try leaving again.",
-        );
+        setStatus("Network hiccup during upload. Stay connected.");
       });
     };
-    recorder.onerror = () =>
-      setStatus("The browser reported a recording error.");
+
+    recorder.onerror = () => setStatus("Browser media recording alert.");
     recorder.start(10000);
     setRecording(true);
-    setStatus("Recording your microphone and saving audio chunks...");
+    setStatus("Microphone active & transmitting.");
   }
 
   async function saveRecording() {
     const recorder = mediaRecorderRef.current;
     if (!recordingSessionIdRef.current) {
-      setStatus("No recording session was started. Please rejoin the room.");
+      setStatus("No active session detected.");
       return false;
     }
     setSaving(true);
-    setStatus("Finishing audio upload...");
+    setStatus("Finalizing audio stream...");
     try {
       if (recorder && recorder.state !== "inactive") {
         await new Promise((resolve, reject) => {
@@ -198,14 +203,11 @@ export default function App() {
       const results = await Promise.allSettled(pendingUploadsRef.current);
       const failed = results.some((result) => result.status === "rejected");
       if (failed)
-        throw new Error(
-          "Some audio chunks failed to upload. Please check your connection and leave the room again.",
-        );
+        throw new Error("Incomplete upload. Re-check network and exit again.");
       const totalChunks = chunkSequenceRef.current;
       if (totalChunks < 1)
-        throw new Error(
-          "No audio chunks were recorded. Speak for at least a few seconds and try again.",
-        );
+        throw new Error("No speech recorded. Speak before leaving.");
+
       const response = await fetch(`${SERVER_URL}/api/recordings/finalize`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -217,14 +219,13 @@ export default function App() {
       });
       const result = await response.json().catch(() => ({}));
       if (!response.ok)
-        throw new Error(result.error || "Could not finalize the recording.");
-      setStatus(
-        "Recording saved successfully. You can open Analysis from the home screen.",
-      );
+        throw new Error(result.error || "Recording finalization failed.");
+
+      setStatus("Session saved successfully.");
       return true;
     } catch (err) {
-      console.error("Could not finish recording:", err);
-      setStatus(err.message || "Recording could not be saved.");
+      console.error("Save error:", err);
+      setStatus(err.message || "Failed to persist audio recording.");
       return false;
     } finally {
       setSaving(false);
@@ -232,25 +233,27 @@ export default function App() {
     }
   }
 
-  async function joinRoom(id) {
+  async function joinRoom(targetRoomId) {
     setError("");
     const normalized = normalizeUsername(username);
     if (!validUsername(normalized)) {
-      setError("Username must contain 3–20 letters, numbers, or underscores.");
+      setError("Username must be 3–20 alphanumeric characters or underscores.");
       return;
     }
     setUsername(normalized);
+
     if (!consent) {
-      setError("Please agree to recording before joining.");
+      setError("Audio recording consent is required to enter voice rooms.");
       return;
     }
     if (!socketRef.current?.connected) {
-      setError("Voice server is disconnected. Try again.");
+      setError("Signaling server disconnected. Please refresh and retry.");
       return;
     }
+
     let stream;
     try {
-      setStatus("Requesting microphone permission...");
+      setStatus("Requesting microphone authorization...");
       stream = await navigator.mediaDevices.getUserMedia({
         audio: {
           echoCancellation: true,
@@ -260,12 +263,13 @@ export default function App() {
         video: false,
       });
       streamRef.current = stream;
-      socketRef.current.emit("room:join", { roomId: id }, (result) => {
+
+      socketRef.current.emit("room:join", { roomId: targetRoomId }, (result) => {
         if (!result?.ok) {
           stream.getTracks().forEach((track) => track.stop());
           streamRef.current = null;
           setStatus("Ready");
-          setError(result?.error || "Could not join room.");
+          setError(result?.error || "Could not join voice session.");
           return;
         }
         setRoomId(result.roomId);
@@ -275,9 +279,9 @@ export default function App() {
         try {
           startRecording(stream);
         } catch (err) {
-          setError(err.message || "Could not start recording.");
+          setError(err.message || "Microphone recording initialization failed.");
         }
-        setStatus("Connected. Your microphone is being recorded.");
+        setStatus("Connected to voice channel.");
         result.peers.forEach((peerId) => createPeer(peerId, false));
       });
     } catch (err) {
@@ -286,43 +290,48 @@ export default function App() {
       setStatus("Ready");
       setError(
         err.name === "NotAllowedError"
-          ? "Allow microphone access in your browser and try again."
-          : "Could not access your microphone. Use localhost or HTTPS.",
+          ? "Microphone permission denied. Allow mic access in browser settings."
+          : "Audio device unreadable. Make sure you are on HTTPS or localhost.",
       );
     }
   }
 
-  function createRoom() {
+  function handleFormSubmit(e) {
+    e.preventDefault();
     setError("");
-    if (!validUsername(username)) {
-      setError("Username must contain 3–20 letters, numbers, or underscores.");
+
+    const normalized = normalizeUsername(username);
+    if (!validUsername(normalized)) {
+      setError("Username must be 3–20 characters (letters, numbers, underscores).");
       return;
     }
+
     if (!consent) {
-      setError("Please agree to recording before creating a room.");
+      setError("You must acknowledge and agree to microphone recording.");
       return;
     }
+
     if (!socketRef.current?.connected) {
-      setError("Voice server is disconnected. Try again.");
+      setError("Connection to voice server is offline. Check backend.");
       return;
     }
-    socketRef.current.emit("room:create", (result) => {
-      if (!result?.ok) {
-        setError(result?.error || "Could not create a room.");
+
+    if (mode === "create") {
+      socketRef.current.emit("room:create", (result) => {
+        if (!result?.ok) {
+          setError(result?.error || "Room generation failed.");
+          return;
+        }
+        joinRoom(result.roomId);
+      });
+    } else {
+      const cleanId = roomInput.trim().toUpperCase();
+      if (!cleanId) {
+        setError("Please enter the Room ID to connect.");
         return;
       }
-      joinRoom(result.roomId);
-    });
-  }
-
-  function joinById(event) {
-    event.preventDefault();
-    const id = roomInput.trim().toUpperCase();
-    if (!id) {
-      setError("Enter a room ID.");
-      return;
+      joinRoom(cleanId);
     }
-    joinRoom(id);
   }
 
   function toggleMute() {
@@ -344,26 +353,26 @@ export default function App() {
     setRoomId("");
     setRoomInput("");
     setScreen("home");
-    setStatus("Recording saved. Ready for another session.");
+    setStatus("Session closed and saved.");
   }
 
   async function copyRoomId() {
     try {
       await navigator.clipboard.writeText(roomId);
-      setStatus("Room ID copied.");
+      setCopied(true);
+      setTimeout(() => setCopied(false), 2000);
+      setStatus("Room ID copied to clipboard.");
     } catch {
-      setStatus(`Share this room ID: ${roomId}`);
+      setStatus(`Room ID: ${roomId}`);
     }
   }
 
-  async function analyzeLatest(event) {
-    event?.preventDefault();
+  async function analyzeLatest(e) {
+    e?.preventDefault();
     const requestedUsername = normalizeUsername(analysisUsername);
     setAnalysisError("");
     if (!validUsername(requestedUsername)) {
-      setAnalysisError(
-        "Enter a username with 3–20 letters, numbers, or underscores.",
-      );
+      setAnalysisError("Enter a valid username (3–20 lowercase alphanumeric).");
       return;
     }
     setAnalyzing(true);
@@ -379,9 +388,7 @@ export default function App() {
       );
       const result = await response.json().catch(() => ({}));
       if (!response.ok)
-        throw new Error(
-          result.error || "Could not retrieve your latest recording.",
-        );
+        throw new Error(result.error || "Unable to retrieve analysis.");
       let parsed = result.analysis;
       if (typeof parsed === "string") {
         parsed = parsed.replace(/^```(?:json)?\s*/i, "").replace(/\s*```$/, "");
@@ -390,370 +397,467 @@ export default function App() {
       setAnalysis(parsed);
       setShowAnalysisLogin(false);
     } catch (err) {
-      setAnalysisError(
-        err.message || "Could not analyze the latest recording.",
-      );
+      setAnalysisError(err.message || "Failed to analyze speech records.");
     } finally {
       setAnalyzing(false);
     }
   }
 
-  const inputClass =
-    "w-full rounded-xl border border-slate-300 bg-white px-4 py-3 text-sm text-slate-900 outline-none transition placeholder:text-slate-400 focus:border-indigo-500 focus:ring-4 focus:ring-indigo-100";
-  const primaryClass =
-    "inline-flex items-center justify-center rounded-xl bg-indigo-600 px-5 py-3 font-semibold text-white shadow-sm transition hover:bg-indigo-700 focus:outline-none focus:ring-4 focus:ring-indigo-200 disabled:cursor-not-allowed disabled:opacity-50";
-  const secondaryClass =
-    "inline-flex items-center justify-center rounded-xl border border-slate-300 bg-white px-5 py-3 font-semibold text-slate-700 transition hover:bg-slate-50 focus:outline-none focus:ring-4 focus:ring-slate-100 disabled:opacity-50";
-
   return (
-    <main className="min-h-screen bg-slate-50 px-4 py-8 text-slate-900 sm:px-6">
-      <div className="mx-auto flex w-full max-w-3xl flex-col gap-6">
-        <header className="flex items-center gap-3">
-          <div className="grid h-12 w-12 place-items-center rounded-2xl bg-indigo-600 text-xl font-black text-white shadow-sm">
-            E
+    <div className="min-h-screen bg-slate-950 font-sans text-slate-100 antialiased selection:bg-slate-700 selection:text-white">
+      {/* Background Subtle Gradient & Structure */}
+      <div className="relative mx-auto flex min-h-screen max-w-4xl flex-col justify-between px-4 py-8 sm:px-6 sm:py-12">
+        {/* Top Header */}
+        <header className="flex items-center justify-between border-b border-slate-800/80 pb-6">
+          <div className="flex items-center gap-3">
+            <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-slate-800 border border-slate-700/60 shadow-sm">
+              <span className="font-semibold text-slate-200">EP</span>
+            </div>
+            <div>
+              <h1 className="text-base font-semibold tracking-tight text-white">
+                English Practice
+              </h1>
+              <p className="text-xs text-slate-400">
+                Peer-to-peer conversational space
+              </p>
+            </div>
           </div>
-          <div>
-            <p className="text-lg font-bold tracking-tight">English Practice</p>
-            <p className="text-sm text-slate-500">
-              Voice rooms · Speak, learn, improve
-            </p>
+
+          <div className="flex items-center gap-2">
+            <span className="inline-flex items-center gap-1.5 rounded-full border border-slate-800 bg-slate-900/60 px-3 py-1 text-xs font-medium text-slate-300">
+              <span className="h-1.5 w-1.5 rounded-full bg-emerald-500" />
+              WebRTC Audio
+            </span>
           </div>
         </header>
 
-        {screen === "home" ? (
-          <section className="rounded-3xl border border-slate-200 bg-white p-6 shadow-sm sm:p-9">
-            <p className="text-xs font-bold uppercase tracking-[0.2em] text-indigo-600">
-              Practise together
-            </p>
-            <h1 className="mt-3 text-3xl font-bold tracking-tight sm:text-4xl">
-              Speak English
-              <br />
-              <span className="text-indigo-600">with your friends.</span>
-            </h1>
-            <p className="mt-4 max-w-xl leading-7 text-slate-600">
-              Create a room or join your friend's room using a room ID. No
-              account needed. Use the same username whenever you want to view
-              your latest analysis.
-            </p>
+        {/* Main Content Area */}
+        <main className="my-auto py-8">
+          {screen === "home" ? (
+            <div className="mx-auto max-w-lg">
+              {/* Primary Action Card */}
+              <div className="rounded-2xl border border-slate-800 bg-slate-900/90 p-6 shadow-xl backdrop-blur-sm sm:p-8">
+                {/* Intro Copy */}
+                <div className="mb-6 text-center sm:text-left">
+                  <h2 className="text-2xl font-bold tracking-tight text-white">
+                    Start Speaking
+                  </h2>
+                  <p className="mt-1 text-sm text-slate-400">
+                    Collaborate with peers to build fluency. No passwords needed.
+                  </p>
+                </div>
 
-            <div className="mt-7 space-y-2">
-              <label htmlFor="username" className="block text-sm font-semibold">
-                Your username
-              </label>
-              <input
-                id="username"
-                className={inputClass}
-                value={username}
-                onChange={(e) => setUsername(e.target.value)}
-                placeholder="e.g. aljafar_01"
-                minLength={3}
-                maxLength={20}
-                autoComplete="username"
-              />
-              <p className="text-xs leading-5 text-slate-500">
-                3–20 characters: lowercase letters, numbers, and underscores.
-                Usernames are not passwords or verified identities.
-              </p>
-            </div>
-
-            <button
-              className={`${primaryClass} mt-5 w-full`}
-              onClick={createRoom}
-            >
-              ＋ Create a room
-            </button>
-            <div className="my-6 flex items-center gap-3 text-xs font-semibold uppercase tracking-widest text-slate-400">
-              <span className="h-px flex-1 bg-slate-200" />
-              Or join a room
-              <span className="h-px flex-1 bg-slate-200" />
-            </div>
-            <form onSubmit={joinById} className="space-y-3">
-              <label htmlFor="roomId" className="block text-sm font-semibold">
-                Room ID
-              </label>
-              <input
-                id="roomId"
-                className={inputClass}
-                value={roomInput}
-                onChange={(e) => setRoomInput(e.target.value)}
-                placeholder="e.g. A1B2C3"
-                autoComplete="off"
-              />
-              <button className={`${secondaryClass} w-full`} type="submit">
-                Join room
-              </button>
-            </form>
-            <label className="mt-6 flex cursor-pointer items-start gap-3 rounded-xl bg-slate-50 p-4 text-sm leading-6 text-slate-600">
-              <input
-                className="mt-1 h-4 w-4 accent-indigo-600"
-                type="checkbox"
-                checked={consent}
-                onChange={(e) => setConsent(e.target.checked)}
-              />
-              <span>
-                I agree to have my microphone audio recorded and saved for
-                English practice. I will tell other participants that recording
-                is enabled.
-              </span>
-            </label>
-            {error && (
-              <p
-                role="alert"
-                className="mt-4 rounded-xl bg-rose-50 p-3 text-sm text-rose-700"
-              >
-                {error}
-              </p>
-            )}
-
-            <div className="mt-8 border-t border-slate-100 pt-6">
-              <h2 className="font-bold">Review your latest recording</h2>
-              <p className="mt-1 text-sm leading-6 text-slate-500">
-                Enter your username to analyze the latest completed session
-                saved under it.
-              </p>
-              {!showAnalysisLogin ? (
-                <button
-                  className={`${secondaryClass} mt-4 w-full`}
-                  onClick={() => {
-                    setAnalysisUsername(username);
-                    setShowAnalysisLogin(true);
-                    setAnalysisError("");
-                    setAnalysis(null);
-                  }}
+                {/* Segmented Control / Toggle Switch */}
+                <div
+                  role="tablist"
+                  aria-label="Room Action Selection"
+                  className="mb-6 grid grid-cols-2 rounded-xl bg-slate-950 p-1 border border-slate-800"
                 >
-                  View my analysis
-                </button>
-              ) : (
-                <form className="mt-4 space-y-3" onSubmit={analyzeLatest}>
-                  <label
-                    htmlFor="analysisUsername"
-                    className="block text-sm font-semibold"
+                  <button
+                    type="button"
+                    role="tab"
+                    aria-selected={mode === "create"}
+                    onClick={() => {
+                      setMode("create");
+                      setError("");
+                    }}
+                    className={`flex items-center justify-center gap-2 rounded-lg py-2.5 text-xs font-semibold tracking-wide transition-all ${
+                      mode === "create"
+                        ? "bg-slate-800 text-white shadow-sm border border-slate-700/60"
+                        : "text-slate-400 hover:text-slate-200"
+                    }`}
                   >
-                    Username for analysis
-                  </label>
-                  <input
-                    id="analysisUsername"
-                    className={inputClass}
-                    value={analysisUsername}
-                    onChange={(e) => setAnalysisUsername(e.target.value)}
-                    placeholder="Enter the username used for recording"
-                    autoComplete="username"
-                  />
-                  {analysisError && (
-                    <p role="alert" className="text-sm text-rose-700">
-                      {analysisError}
-                    </p>
-                  )}
-                  <div className="flex flex-col gap-2 sm:flex-row">
-                    <button
-                      className={`${primaryClass} flex-1`}
-                      type="submit"
-                      disabled={analyzing}
+                    <svg
+                      className="h-3.5 w-3.5"
+                      fill="none"
+                      viewBox="0 0 24 24"
+                      stroke="currentColor"
+                      strokeWidth={2}
                     >
-                      {analyzing
-                        ? "Analyzing latest recording…"
-                        : "Get my analysis"}
-                    </button>
-                    <button
-                      className={secondaryClass}
-                      type="button"
-                      onClick={() => setShowAnalysisLogin(false)}
-                    >
-                      Cancel
-                    </button>
-                  </div>
-                </form>
-              )}
-            </div>
-          </section>
-        ) : (
-          <section className="rounded-3xl border border-slate-200 bg-white p-6 shadow-sm sm:p-9">
-            <p className="text-xs font-bold uppercase tracking-[0.2em] text-indigo-600">
-              Voice room
-            </p>
-            <h1 className="mt-3 text-3xl font-bold">
-              Room <span className="text-indigo-600">{roomId}</span>
-            </h1>
-            <p className="mt-3 text-slate-600">
-              You are joining as <strong>{username}</strong>. Share this room ID
-              with your friends.
-            </p>
-            <div className="mt-5 flex items-center justify-between rounded-2xl bg-slate-50 p-4">
-              <span className="font-mono text-xl font-bold tracking-widest">
-                {roomId}
-              </span>
-              <button className={secondaryClass} onClick={copyRoomId}>
-                Copy ID
-              </button>
-            </div>
-            <div className="mt-5 flex items-center gap-4 rounded-2xl border border-slate-200 p-4">
-              <div className="grid h-12 w-12 place-items-center rounded-xl bg-indigo-50 text-2xl">
-                {muted ? "🔇" : "🎙️"}
-              </div>
-              <div>
-                <p className="font-semibold">
-                  {participants} {participants === 1 ? "person" : "people"} in
-                  the room
-                </p>
-                <p className="text-sm text-slate-500">
-                  {saving
-                    ? "Saving recording…"
-                    : recording
-                      ? "Recording your microphone"
-                      : status}
-                </p>
-              </div>
-              <span
-                className={`ml-auto h-2.5 w-2.5 rounded-full ${recording ? "animate-pulse bg-rose-500" : "bg-slate-300"}`}
-              />
-            </div>
-            <p className="mt-4 text-sm leading-6 text-slate-500">
-              Only your own microphone audio is saved. Keep this tab open during
-              the call so audio chunks can upload.
-            </p>
-            <div className="mt-6 grid gap-3 sm:grid-cols-2">
-              <button
-                className={secondaryClass}
-                onClick={toggleMute}
-                disabled={saving}
-              >
-                {muted ? "Unmute microphone" : "Mute microphone"}
-              </button>
-              <button
-                className="inline-flex items-center justify-center rounded-xl bg-rose-600 px-5 py-3 font-semibold text-white transition hover:bg-rose-700 disabled:opacity-50"
-                onClick={leaveCall}
-                disabled={saving}
-              >
-                {saving ? "Saving audio…" : "Leave call & save"}
-              </button>
-            </div>
-            {status && (
-              <p className="mt-4 text-sm text-slate-600" role="status">
-                {status}
-              </p>
-            )}
-            {error && (
-              <p
-                role="alert"
-                className="mt-3 rounded-xl bg-rose-50 p-3 text-sm text-rose-700"
-              >
-                {error}
-              </p>
-            )}
-            <div
-              ref={audioContainerRef}
-              className="hidden"
-              aria-hidden="true"
-            />
-          </section>
-        )}
+                      <path
+                        strokeLinecap="round"
+                        strokeLinejoin="round"
+                        d="M12 4v16m8-8H4"
+                      />
+                    </svg>
+                    Create a room
+                  </button>
 
-        {analysis && (
-          <section className="rounded-3xl border border-slate-200 bg-white p-6 shadow-sm sm:p-9">
-            <div className="flex flex-wrap items-center justify-between gap-3">
-              <div>
-                <p className="text-xs font-bold uppercase tracking-[0.2em] text-indigo-600">
-                  Speaking review
-                </p>
-                <h2 className="mt-2 text-2xl font-bold">
-                  Your English analysis
-                </h2>
+                  <button
+                    type="button"
+                    role="tab"
+                    aria-selected={mode === "join"}
+                    onClick={() => {
+                      setMode("join");
+                      setError("");
+                    }}
+                    className={`flex items-center justify-center gap-2 rounded-lg py-2.5 text-xs font-semibold tracking-wide transition-all ${
+                      mode === "join"
+                        ? "bg-slate-800 text-white shadow-sm border border-slate-700/60"
+                        : "text-slate-400 hover:text-slate-200"
+                    }`}
+                  >
+                    <svg
+                      className="h-3.5 w-3.5"
+                      fill="none"
+                      viewBox="0 0 24 24"
+                      stroke="currentColor"
+                      strokeWidth={2}
+                    >
+                      <path
+                        strokeLinecap="round"
+                        strokeLinejoin="round"
+                        d="M11 16l-4-4m0 0l4-4m-4 4h14m-5 4v1a3 3 0 01-3 3H6a3 3 0 01-3-3V7a3 3 0 013-3h7a3 3 0 013 3v1"
+                      />
+                    </svg>
+                    Join a room
+                  </button>
+                </div>
+
+                {/* Form Handling Both Scenarios */}
+                <form onSubmit={handleFormSubmit} className="space-y-4">
+                  {/* Field: Username (Both modes) */}
+                  <div>
+                    <label
+                      htmlFor="username"
+                      className="block text-xs font-medium uppercase tracking-wider text-slate-300"
+                    >
+                      Your Username
+                    </label>
+                    <input
+                      id="username"
+                      type="text"
+                      className="mt-1.5 w-full rounded-xl border border-slate-800 bg-slate-950/70 px-3.5 py-2.5 text-sm text-slate-100 placeholder-slate-500 outline-none transition focus:border-slate-600 focus:ring-1 focus:ring-slate-600"
+                      value={username}
+                      onChange={(e) => setUsername(e.target.value)}
+                      placeholder="e.g. aljafar_01"
+                      minLength={3}
+                      maxLength={20}
+                      autoComplete="username"
+                    />
+                    <p className="mt-1 text-[11px] text-slate-500">
+                      3–20 lowercase characters, numbers, or underscores.
+                    </p>
+                  </div>
+
+                  {/* Field: Room ID (Only Join Mode) */}
+                  {mode === "join" && (
+                    <div className="transition-all duration-150">
+                      <label
+                        htmlFor="roomId"
+                        className="block text-xs font-medium uppercase tracking-wider text-slate-300"
+                      >
+                        Room ID
+                      </label>
+                      <input
+                        id="roomId"
+                        type="text"
+                        className="mt-1.5 w-full uppercase tracking-wider font-mono rounded-xl border border-slate-800 bg-slate-950/70 px-3.5 py-2.5 text-sm text-slate-100 placeholder-slate-500 outline-none transition focus:border-slate-600 focus:ring-1 focus:ring-slate-600"
+                        value={roomInput}
+                        onChange={(e) => setRoomInput(e.target.value)}
+                        placeholder="e.g. 7X9K2L"
+                        autoComplete="off"
+                      />
+                    </div>
+                  )}
+
+                  {/* Field: Microphone Consent Checkbox (Both modes) */}
+                  <label className="flex items-start gap-3 rounded-xl border border-slate-800/80 bg-slate-950/40 p-3.5 text-xs leading-relaxed text-slate-300 cursor-pointer select-none hover:border-slate-700 transition">
+                    <input
+                      type="checkbox"
+                      className="mt-0.5 h-4 w-4 rounded border-slate-700 bg-slate-900 text-slate-100 accent-slate-600 focus:ring-0"
+                      checked={consent}
+                      onChange={(e) => setConsent(e.target.checked)}
+                    />
+                    <span>
+                      I agree to have my microphone audio recorded and saved for
+                      English language practice and evaluation.
+                    </span>
+                  </label>
+
+                  {/* Error Notification */}
+                  {error && (
+                    <div
+                      role="alert"
+                      className="rounded-xl border border-rose-900/60 bg-rose-950/40 px-3.5 py-2.5 text-xs text-rose-300"
+                    >
+                      {error}
+                    </div>
+                  )}
+
+                  {/* Submit CTA */}
+                  <button
+                    type="submit"
+                    className="w-full rounded-xl bg-slate-100 py-3 text-sm font-semibold text-slate-950 shadow-md transition hover:bg-white active:scale-[0.99]"
+                  >
+                    {mode === "create" ? "Create Room & Connect" : "Join Voice Room"}
+                  </button>
+                </form>
+
+                {/* Analysis Drawer Trigger */}
+                <div className="mt-6 border-t border-slate-800/80 pt-5 text-center">
+                  {!showAnalysisLogin ? (
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setAnalysisUsername(username);
+                        setShowAnalysisLogin(true);
+                        setAnalysisError("");
+                        setAnalysis(null);
+                      }}
+                      className="text-xs font-medium text-slate-400 hover:text-slate-200 transition"
+                    >
+                      Looking for past feedback? <span className="underline">Review latest analysis</span>
+                    </button>
+                  ) : (
+                    <form onSubmit={analyzeLatest} className="space-y-3 text-left">
+                      <div className="flex items-center justify-between">
+                        <span className="text-xs font-semibold uppercase tracking-wider text-slate-300">
+                          Inspect Past Performance
+                        </span>
+                        <button
+                          type="button"
+                          onClick={() => setShowAnalysisLogin(false)}
+                          className="text-xs text-slate-400 hover:text-slate-200"
+                        >
+                          Close
+                        </button>
+                      </div>
+
+                      <input
+                        className="w-full rounded-xl border border-slate-800 bg-slate-950 px-3 py-2 text-xs text-slate-100 placeholder-slate-500 outline-none focus:border-slate-600"
+                        value={analysisUsername}
+                        onChange={(e) => setAnalysisUsername(e.target.value)}
+                        placeholder="Recorded username"
+                      />
+
+                      {analysisError && (
+                        <p className="text-xs text-rose-400">{analysisError}</p>
+                      )}
+
+                      <button
+                        type="submit"
+                        disabled={analyzing}
+                        className="w-full rounded-xl border border-slate-700 bg-slate-800 py-2 text-xs font-medium text-white hover:bg-slate-700 transition disabled:opacity-50"
+                      >
+                        {analyzing ? "Running analysis…" : "Fetch Speaking Report"}
+                      </button>
+                    </form>
+                  )}
+                </div>
               </div>
-              <span className="rounded-full bg-slate-100 px-3 py-1 text-xs font-semibold text-slate-600">
-                @{analysisUsername.trim().toLowerCase()}
-              </span>
             </div>
-            {!analysis.speechDetected ? (
-              <p className="mt-5 rounded-2xl bg-amber-50 p-4 text-sm leading-6 text-amber-900">
-                {analysis.noSpeechMessage ||
-                  "I couldn't detect enough clear speech to analyze your English. Please record again and speak clearly."}
-              </p>
-            ) : (
-              <>
-                <div className="mt-6">
-                  <h3 className="text-lg font-bold">1. Mistakes</h3>
-                  {analysis.mistakes?.length ? (
-                    <div className="mt-3 space-y-3">
-                      {analysis.mistakes.map((item, index) => (
-                        <article
-                          key={`m-${index}`}
-                          className="rounded-2xl border border-rose-100 bg-rose-50/50 p-4"
-                        >
-                          <p className="text-xs font-bold uppercase tracking-wider text-rose-700">
-                            Original
-                          </p>
-                          <p className="mt-1 leading-6 text-slate-700">
-                            <s>{item.original}</s>
-                          </p>
-                          <p className="mt-3 text-xs font-bold uppercase tracking-wider text-emerald-700">
-                            Correct sentence
-                          </p>
-                          <p className="mt-1 font-medium leading-6 text-slate-900">
-                            {item.correction}
-                          </p>
-                          <p className="mt-3 text-sm leading-6 text-slate-600">
-                            <strong>Reason:</strong> {item.reason}
-                          </p>
-                        </article>
-                      ))}
-                    </div>
-                  ) : (
-                    <p className="mt-3 rounded-xl bg-emerald-50 p-4 text-sm text-emerald-800">
-                      No significant mistakes found.
-                    </p>
-                  )}
+          ) : (
+            /* Active Call Screen */
+            <div className="mx-auto max-w-xl">
+              <div className="rounded-2xl border border-slate-800 bg-slate-900 p-6 shadow-xl sm:p-8">
+                {/* Room Status Indicator */}
+                <div className="flex items-center justify-between border-b border-slate-800 pb-5">
+                  <div>
+                    <span className="text-[11px] font-semibold uppercase tracking-wider text-slate-400">
+                      Active Voice Session
+                    </span>
+                    <h2 className="text-xl font-bold tracking-tight text-white">
+                      Room {roomId}
+                    </h2>
+                  </div>
+
+                  <button
+                    type="button"
+                    onClick={copyRoomId}
+                    className="inline-flex items-center gap-1.5 rounded-lg border border-slate-700 bg-slate-800/90 px-3 py-1.5 text-xs font-medium text-slate-200 transition hover:bg-slate-700"
+                  >
+                    {copied ? "Copied!" : "Copy Room ID"}
+                  </button>
                 </div>
-                <div className="mt-7">
-                  <h3 className="text-lg font-bold">2. Suggestions</h3>
-                  {analysis.suggestions?.length ? (
-                    <div className="mt-3 space-y-3">
-                      {analysis.suggestions.map((item, index) => (
-                        <article
-                          key={`s-${index}`}
-                          className="rounded-2xl border border-indigo-100 bg-indigo-50/50 p-4"
-                        >
-                          <p className="text-xs font-bold uppercase tracking-wider text-slate-500">
-                            Your sentence
-                          </p>
-                          <p className="mt-1 leading-6 text-slate-700">
-                            {item.original}
-                          </p>
-                          <p className="mt-3 text-xs font-bold uppercase tracking-wider text-indigo-700">
-                            For a more natural tone
-                          </p>
-                          <p className="mt-1 font-medium leading-6 text-slate-900">
-                            {item.naturalVersion}
-                          </p>
-                          <p className="mt-3 text-sm leading-6 text-slate-600">
-                            <strong>Reason:</strong> {item.reason}
-                          </p>
-                        </article>
-                      ))}
-                    </div>
-                  ) : (
-                    <p className="mt-3 rounded-xl bg-slate-50 p-4 text-sm text-slate-600">
-                      No suggestions needed.
+
+                {/* Session Meta */}
+                <div className="mt-5 grid grid-cols-2 gap-3">
+                  <div className="rounded-xl border border-slate-800 bg-slate-950/60 p-4">
+                    <p className="text-xs text-slate-400">Connected As</p>
+                    <p className="mt-1 font-mono text-sm font-semibold text-slate-200">
+                      @{username}
                     </p>
-                  )}
+                  </div>
+                  <div className="rounded-xl border border-slate-800 bg-slate-950/60 p-4">
+                    <p className="text-xs text-slate-400">Participants</p>
+                    <p className="mt-1 text-sm font-semibold text-slate-200">
+                      {participants} {participants === 1 ? "speaker" : "speakers"}
+                    </p>
+                  </div>
                 </div>
-              </>
-            )}
-            <button
-              className={`${secondaryClass} mt-6 w-full`}
-              onClick={() => {
-                setAnalysis(null);
-                setShowAnalysisLogin(true);
-              }}
-            >
-              Analyze another username
-            </button>
-          </section>
-        )}
-        <footer className="pb-4 text-center text-xs leading-5 text-slate-400">
-          Simple, friendly English practice. No account required. Audio is saved
-          for analysis under the username you provide.
+
+                {/* Audio Status Banner */}
+                <div className="mt-4 flex items-center justify-between rounded-xl border border-slate-800 bg-slate-950/40 p-4">
+                  <div className="flex items-center gap-3">
+                    <span
+                      className={`relative flex h-3 w-3 ${
+                        recording ? "opacity-100" : "opacity-40"
+                      }`}
+                    >
+                      {recording && (
+                        <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-rose-400 opacity-75" />
+                      )}
+                      <span
+                        className={`relative inline-flex h-3 w-3 rounded-full ${
+                          recording ? "bg-rose-500" : "bg-slate-600"
+                        }`}
+                      />
+                    </span>
+                    <span className="text-xs text-slate-300">
+                      {saving ? "Finalizing audio chunks…" : status}
+                    </span>
+                  </div>
+
+                  <span className="font-mono text-xs text-slate-400">
+                    {muted ? "MUTED" : "LIVE"}
+                  </span>
+                </div>
+
+                {/* Call Control Buttons */}
+                <div className="mt-6 grid grid-cols-2 gap-3">
+                  <button
+                    type="button"
+                    onClick={toggleMute}
+                    disabled={saving}
+                    className={`rounded-xl border py-3 text-xs font-semibold tracking-wide transition ${
+                      muted
+                        ? "border-amber-700/80 bg-amber-950/30 text-amber-300 hover:bg-amber-950/50"
+                        : "border-slate-700 bg-slate-800 text-slate-200 hover:bg-slate-700"
+                    }`}
+                  >
+                    {muted ? "Unmute Microphone" : "Mute Microphone"}
+                  </button>
+
+                  <button
+                    type="button"
+                    onClick={leaveCall}
+                    disabled={saving}
+                    className="rounded-xl border border-rose-900/80 bg-rose-950/40 py-3 text-xs font-semibold tracking-wide text-rose-200 transition hover:bg-rose-900/60 disabled:opacity-50"
+                  >
+                    {saving ? "Saving..." : "Leave & Save Audio"}
+                  </button>
+                </div>
+
+                {error && (
+                  <p className="mt-4 text-xs text-rose-400" role="alert">
+                    {error}
+                  </p>
+                )}
+
+                {/* Hidden container for WebRTC Remote Audio Elements */}
+                <div ref={audioContainerRef} className="hidden" aria-hidden="true" />
+              </div>
+            </div>
+          )}
+
+          {/* Analysis Results Display */}
+          {analysis && (
+            <div className="mx-auto mt-8 max-w-2xl rounded-2xl border border-slate-800 bg-slate-900 p-6 shadow-xl sm:p-8">
+              <div className="flex items-center justify-between border-b border-slate-800 pb-4">
+                <div>
+                  <span className="text-[11px] font-semibold uppercase tracking-wider text-slate-400">
+                    Speech Evaluation
+                  </span>
+                  <h3 className="text-lg font-bold text-white">
+                    Performance Breakdown
+                  </h3>
+                </div>
+                <span className="rounded-lg border border-slate-800 bg-slate-950 px-2.5 py-1 font-mono text-xs text-slate-300">
+                  @{analysisUsername}
+                </span>
+              </div>
+
+              {!analysis.speechDetected ? (
+                <div className="mt-5 rounded-xl border border-amber-900/60 bg-amber-950/30 p-4 text-xs text-amber-200 leading-relaxed">
+                  {analysis.noSpeechMessage ||
+                    "Insufficient audio detected. Please record a conversation where you speak clearly."}
+                </div>
+              ) : (
+                <div className="mt-6 space-y-6">
+                  {/* Mistakes */}
+                  <div>
+                    <h4 className="text-xs font-bold uppercase tracking-wider text-slate-400">
+                      Identified Grammatical Inaccuracies
+                    </h4>
+                    {analysis.mistakes?.length ? (
+                      <div className="mt-3 space-y-3">
+                        {analysis.mistakes.map((item, idx) => (
+                          <div
+                            key={`m-${idx}`}
+                            className="rounded-xl border border-slate-800 bg-slate-950/70 p-4 text-xs"
+                          >
+                            <p className="text-slate-400 line-through">
+                              {item.original}
+                            </p>
+                            <p className="mt-1.5 font-semibold text-emerald-400">
+                              {item.correction}
+                            </p>
+                            <p className="mt-2 text-slate-400">
+                              <span className="text-slate-300 font-medium">Context:</span>{" "}
+                              {item.reason}
+                            </p>
+                          </div>
+                        ))}
+                      </div>
+                    ) : (
+                      <p className="mt-2 text-xs text-slate-400">
+                        No major grammatical errors flagged.
+                      </p>
+                    )}
+                  </div>
+
+                  {/* Suggestions */}
+                  <div>
+                    <h4 className="text-xs font-bold uppercase tracking-wider text-slate-400">
+                      Natural Phrasing Suggestions
+                    </h4>
+                    {analysis.suggestions?.length ? (
+                      <div className="mt-3 space-y-3">
+                        {analysis.suggestions.map((item, idx) => (
+                          <div
+                            key={`s-${idx}`}
+                            className="rounded-xl border border-slate-800 bg-slate-950/70 p-4 text-xs"
+                          >
+                            <p className="text-slate-400">{item.original}</p>
+                            <p className="mt-1.5 font-semibold text-slate-200">
+                              {item.naturalVersion}
+                            </p>
+                            <p className="mt-2 text-slate-400">
+                              <span className="text-slate-300 font-medium">Rationale:</span>{" "}
+                              {item.reason}
+                            </p>
+                          </div>
+                        ))}
+                      </div>
+                    ) : (
+                      <p className="mt-2 text-xs text-slate-400">
+                        Phrasing sounded natural and conversational.
+                      </p>
+                    )}
+                  </div>
+                </div>
+              )}
+
+              <button
+                type="button"
+                onClick={() => {
+                  setAnalysis(null);
+                  setShowAnalysisLogin(true);
+                }}
+                className="mt-6 w-full rounded-xl border border-slate-700 bg-slate-800 py-2.5 text-xs font-medium text-slate-200 transition hover:bg-slate-700"
+              >
+                Analyze Another User
+              </button>
+            </div>
+          )}
+        </main>
+
+        {/* Quiet Footer */}
+        <footer className="border-t border-slate-800/60 pt-4 text-center text-xs text-slate-400">
+          Peer-to-peer audio encrypted via WebRTC. Recordings retained exclusively under your specified username.
         </footer>
       </div>
-    </main>
+    </div>
   );
 }
