@@ -453,7 +453,7 @@ export default function App() {
                   : "border-slate-200 bg-white text-slate-800"
               }`}
             >
-              EP
+              VR
             </div>
             <div>
               <h1
@@ -461,7 +461,7 @@ export default function App() {
                   isDark ? "text-white" : "text-slate-900"
                 }`}
               >
-                English Practice
+                Voice Room
               </h1>
               <p
                 className={`text-xs ${isDark ? "text-slate-400" : "text-slate-500"}`}
