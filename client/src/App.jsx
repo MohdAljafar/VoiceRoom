@@ -411,11 +411,11 @@ export default function App() {
         <header className="flex items-center justify-between border-b border-slate-800/80 pb-6">
           <div className="flex items-center gap-3">
             <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-slate-800 border border-slate-700/60 shadow-sm">
-              <span className="font-semibold text-slate-200">EP</span>
+              <span className="font-semibold text-slate-200">VR</span>
             </div>
             <div>
               <h1 className="text-base font-semibold tracking-tight text-white">
-                English Practice
+                Voice Room
               </h1>
               <p className="text-xs text-slate-400">
                 Peer-to-peer conversational space
