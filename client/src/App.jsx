@@ -3,7 +3,9 @@ import { io } from "socket.io-client";
 import Peer from "simple-peer";
 
 const SERVER_URL = import.meta.env.VITE_SERVER_URL || "http://localhost:3001";
-const ICE_SERVERS = [{ urls: "stun:stun.l.google.com:19302" }];
+const ICE_SERVERS = [
+  { urls: "stun:stun.l.google.com:19302" },
+];
 const USERNAME_RE = /^[a-z0-9_]{3,20}$/;
 
 export default function App() {
@@ -109,8 +111,19 @@ export default function App() {
             ),
           );
       });
-      peer.on("close", () => removePeer(peerId));
-      peer.on("error", () => removePeer(peerId));
+      peer.on("close", () => {
+        console.log("WebRTC peer closed:", peerId);
+        removePeer(peerId);
+      });
+
+      peer.on("error", (err) => {
+        console.error("WebRTC peer error:", peerId, err);
+        removePeer(peerId);
+      });
+
+      peer.on("connect", () => {
+        console.log("WebRTC connected successfully:", peerId);
+      });
       return entry;
     },
     [removePeer],
